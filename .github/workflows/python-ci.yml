@@ -19,5 +19,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Compile analyzer
-        run: python -m py_compile analyzer.py
+      - name: Compile Python entry points
+        run: |
+          python -m py_compile analyzer.py
+          python -m py_compile web-dashboard/server.py
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check Frida agent JavaScript
+        run: node --check web-dashboard/agent.js
+      - name: Check dashboard browser JavaScript
+        run: |
+          python -c "from pathlib import Path; p=Path('web-dashboard/web/index.html').read_text(); a=p.index('<script>')+len('<script>'); b=p.index('</script>', a); Path('/tmp/dashboard-ui.js').write_text(p[a:b])"
+          node --check /tmp/dashboard-ui.js
