@@ -40,6 +40,12 @@ class State:
         self.last_error: str | None = None
         self.started_at: float | None = None
         self.counters = {"TCP": 0, "UDP": 0, "IN": 0, "OUT": 0, "bytes": 0}
+        self.last_app_scan: dict[str, Any] = {
+            "applications_seen": 0,
+            "running_applications": 0,
+            "processes_seen": 0,
+            "errors": [],
+        }
 
     def _load_device(self):
         if frida is None:
@@ -52,29 +58,63 @@ class State:
     def applications(self):
         device = self._load_device()
         found: dict[str, dict[str, Any]] = {}
+        errors: list[str] = []
+        app_ids: set[str] = set()
+        applications_seen = 0
+        processes_seen = 0
+
         try:
             apps = device.enumerate_applications()
+            applications_seen = len(apps)
             for app in apps:
                 pid = int(getattr(app, "pid", 0) or 0)
                 identifier = str(getattr(app, "identifier", "") or "")
-                if pid > 0 and identifier:
+                if not identifier:
+                    continue
+                app_ids.add(identifier)
+                if pid > 0:
                     found[identifier] = {
                         "identifier": identifier,
                         "name": str(getattr(app, "name", "") or identifier),
                         "pid": pid,
                     }
-        except Exception:
-            pass
-        # Include processes not represented as application records.
+        except Exception as exc:
+            errors.append(f"enumerate_applications: {type(exc).__name__}: {exc}")
+
+        # Include processes that Frida does not expose as application records.
         try:
-            for proc in device.enumerate_processes():
+            processes = device.enumerate_processes()
+            for proc in processes:
+                pid = int(getattr(proc, "pid", 0) or 0)
                 name = str(getattr(proc, "name", "") or "")
+                if pid <= 0 or not name:
+                    continue
+                processes_seen += 1
                 params = getattr(proc, "parameters", {}) or {}
-                identifier = str(params.get("identifier") or name)
-                if identifier and name:
-                    found.setdefault(identifier, {"identifier": identifier, "name": name, "pid": int(proc.pid)})
-        except Exception:
-            pass
+                identifier = str(params.get("identifier") or "") if isinstance(params, dict) else ""
+                if not identifier:
+                    # Android secondary processes commonly use package:process.
+                    identifier = next(
+                        (app_id for app_id in app_ids if name == app_id or name.startswith(app_id + ":")),
+                        name,
+                    )
+                found.setdefault(identifier, {
+                    "identifier": identifier,
+                    "name": name,
+                    "pid": pid,
+                })
+        except Exception as exc:
+            errors.append(f"enumerate_processes: {type(exc).__name__}: {exc}")
+
+        with self.lock:
+            self.last_app_scan = {
+                "applications_seen": applications_seen,
+                "running_applications": sum(
+                    1 for app in found.values() if app["identifier"] in app_ids
+                ),
+                "processes_seen": processes_seen,
+                "errors": errors,
+            }
         return sorted(found.values(), key=lambda x: (x["name"].lower(), x["identifier"]))
 
     def _append(self, item: dict[str, Any]):
@@ -219,6 +259,7 @@ class State:
                 "last_error": self.last_error,
                 "counters": dict(self.counters),
                 "event_count": len(self.events),
+                "app_scan": dict(self.last_app_scan),
             }
 
     def get_events(self, after: int):
@@ -286,7 +327,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(200, self.state.status())
         elif parsed.path == "/api/apps":
             try:
-                self._json(200, {"apps": self.state.applications()})
+                apps = self.state.applications()
+                with self.state.lock:
+                    diagnostics = dict(self.state.last_app_scan)
+                self._json(200, {"apps": apps, "diagnostics": diagnostics})
             except Exception as exc:
                 self._json(502, {"error": str(exc)})
         elif parsed.path == "/api/events":
