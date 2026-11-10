@@ -53,16 +53,16 @@ Unlike traditional proxy setups that require complex Wi-Fi proxies, iptables red
 ## 🛠️ Installation
 
 ```bash
-git clone https://github.com/sowmiksudo/android-tcp-sniffer.git
-cd android-tcp-sniffer
+git clone https://github.com/CPMTooldev/n0proxy-android-traffic-sniffer.git
+cd n0proxy-android-traffic-sniffer
 pip install -r requirements.txt
 ```
 
 ## ⚡ Quick Start
 
 ```bash
-# 1. Connect your device via USB
-adb devices
+# 1. Connect your device via USB or Android Wireless debugging
+adb devices -l
 
 # 2. Sniff SSL traffic (default mode)
 python analyzer.py com.example.app
@@ -70,6 +70,29 @@ python analyzer.py com.example.app
 # 3. Or just run without arguments for the interactive app picker
 python analyzer.py
 ```
+
+## 📡 Wireless ADB (Raspberry Pi / Wi-Fi)
+
+Wireless ADB works without exposing Frida's port directly to the network. Enable **Developer options → Wireless debugging** on Android, pair/connect the device with the normal ADB flow, then verify that it appears as `device`:
+
+```bash
+adb pair <phone-ip>:<pairing-port>
+adb connect <phone-ip>:<wireless-debugging-port>
+adb devices -l
+```
+
+The analyzer detects an active ADB serial and creates a temporary localhost ADB forward to the phone's `127.0.0.1:27042` Frida server endpoint. You do not need to open port 27042 on Wi-Fi or manually configure `adb forward`.
+
+```bash
+# Diagnose the connection
+python analyzer.py --doctor
+
+# Select a specific wireless ADB device
+python analyzer.py --device <adb-serial> --list
+python analyzer.py --device <adb-serial> com.example.app
+```
+
+The `--device` option accepts a Frida device ID, an ADB serial (including the `PHONE_IP:PORT` serial printed by `adb devices`), or a direct Frida `host:port` endpoint.
 
 ## 📖 CLI Reference
 
@@ -89,7 +112,7 @@ options:
                           ssl  — decrypted SSL_read/SSL_write hooks
                           all  — both layers simultaneously
   -a, --attach          Attach to a running process instead of spawning
-  -d, --device DEVICE   Frida device ID (default: first USB device)
+  -d, --device DEVICE   Frida device ID, ADB serial, or Frida host:port (default: auto-detect USB/ADB)
   --pcap FILE           Save traffic to a Wireshark-compatible PCAP file
   --burp FILE           Save HTTP/HTTPS traffic to Burp Suite XML items file
   --har FILE            Save HTTP/HTTPS traffic to standard HAR file (Burp/Caido/ZAP)

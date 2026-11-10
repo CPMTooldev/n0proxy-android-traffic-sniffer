@@ -20,6 +20,7 @@ import argparse
 import textwrap
 import subprocess
 import shutil
+import socket
 import threading
 import re
 import base64
@@ -798,6 +799,9 @@ class Sniffer:
         self.log_fh     = None
         self.device     = None
         self.pid          = None
+        self._frida_manager = None
+        self._adb_serial = None
+        self._adb_forward_port = None
         self.stop_event   = threading.Event()
         self.burp_writer  = None
         self.har_writer   = None
@@ -977,18 +981,20 @@ class Sniffer:
             pass
 
     @staticmethod
-    def _ensure_selinux_permissive():
-        """Ensure SELinux is set to Permissive and frida-server has executable permissions."""
+    def _ensure_selinux_permissive(serial=None):
+        """Ensure SELinux is permissive and frida-server is executable on the selected ADB device."""
+        adb = ["adb"]
+        if serial:
+            adb.extend(["-s", serial])
         try:
-            res = subprocess.run(["adb", "shell", "getenforce"],
+            res = subprocess.run(adb + ["shell", "getenforce"],
                                  capture_output=True, text=True, timeout=3)
             if "Enforcing" in res.stdout:
-                subprocess.run(["adb", "shell", "su -c 'setenforce 0'"],
+                subprocess.run(adb + ["shell", "su -c 'setenforce 0'"],
                                stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL,
                                timeout=3)
-            # Ensure frida-server binary has full read/write/executable permissions
-            subprocess.run(["adb", "shell", "su -c 'chmod 777 /data/local/tmp/frida-server'"],
+            subprocess.run(adb + ["shell", "su -c 'chmod 755 /data/local/tmp/frida-server'"],
                            stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL,
                            timeout=3)
@@ -1013,88 +1019,215 @@ class Sniffer:
         except Exception:
             return []
 
+    def _connect_via_adb_forward(self, serial):
+        """
+        Connect to frida-server through an ADB port forward.
+
+        This supports both USB ADB and Android Wireless debugging. frida-server
+        normally listens on the Android device's loopback interface, so its
+        port 27042 does not need to be exposed to the Wi-Fi network.
+        """
+        self._frida_manager = frida.get_device_manager()
+
+        # Reuse an existing forward for this device if it targets Frida's port.
+        try:
+            forwards = subprocess.run(
+                ["adb", "forward", "--list"],
+                capture_output=True, text=True, timeout=5, check=False
+            )
+            for line in forwards.stdout.splitlines():
+                parts = line.split()
+                if (len(parts) >= 3 and parts[0] == serial
+                        and parts[2] == "tcp:27042"
+                        and parts[1].startswith("tcp:")):
+                    local_port = int(parts[1].split(":", 1)[1])
+                    device = self._frida_manager.add_remote_device(
+                        f"127.0.0.1:{local_port}"
+                    )
+                    device.enumerate_processes()
+                    self._adb_serial = serial
+                    self._adb_forward_port = local_port
+                    return device
+        except Exception:
+            # A stale or incompatible mapping will be replaced with a fresh one.
+            pass
+
+        last_error = None
+        for _ in range(8):
+            # Reserve an unused localhost port, then ask ADB not to overwrite
+            # another application's existing port forward.
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(("127.0.0.1", 0))
+                local_port = sock.getsockname()[1]
+
+            result = subprocess.run(
+                [
+                    "adb", "-s", serial, "forward", "--no-rebind",
+                    f"tcp:{local_port}", "tcp:27042"
+                ],
+                capture_output=True, text=True, timeout=8, check=False
+            )
+            if result.returncode != 0:
+                last_error = (result.stderr or result.stdout).strip()
+                continue
+
+            try:
+                device = self._frida_manager.add_remote_device(
+                    f"127.0.0.1:{local_port}"
+                )
+                # Force a real handshake here so --doctor cannot report a
+                # successful device connection when the server is unreachable.
+                device.enumerate_processes()
+                self._adb_serial = serial
+                self._adb_forward_port = local_port
+                return device
+            except Exception as exc:
+                last_error = str(exc)
+                subprocess.run(
+                    ["adb", "-s", serial, "forward", "--remove", f"tcp:{local_port}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5, check=False
+                )
+
+        raise RuntimeError(
+            f"ADB device '{serial}' is connected, but Frida could not reach "
+            f"frida-server through port forwarding. Ensure frida-server is running "
+            f"on the phone and matches the Python Frida version. "
+            f"Last error: {last_error or 'unknown'}"
+        )
+
     def _get_device(self):
         """
-        Find and connect to the Android device.
-        Automatically starts ADB daemon, handles timeouts, emulators,
-        and provides clear diagnostics if unauthorized/offline.
+        Find an Android device through USB Frida, a direct Frida endpoint,
+        or ADB forwarding (including Android Wireless debugging).
         """
         self._ensure_adb_server()
+        adb_devs = self._get_adb_devices()
 
-        # 1. Explicit device requested via -D / --device
+        # 1. Explicit device requested via -d / --device.
         if self.args.device:
             target_id = self.args.device.strip()
+
+            # An ADB serial (including PHONE_IP:WIRELESS_ADB_PORT) is not a
+            # Frida device ID. Bridge it through ADB to frida-server:27042.
+            adb_match = next(
+                ((serial, status) for serial, status, _ in adb_devs
+                 if serial == target_id),
+                None
+            )
+            if adb_match:
+                serial, status = adb_match
+                if status != "device":
+                    raise RuntimeError(
+                        f"ADB device '{serial}' is {status}. Check Wireless debugging "
+                        f"and approve the debugging authorization prompt."
+                    )
+                return self._connect_via_adb_forward(serial)
+
+            # Preserve normal Frida device-ID support.
             try:
                 return frida.get_device(target_id, timeout=5)
             except Exception:
-                try:
-                    for d in frida.enumerate_devices():
-                        if target_id.lower() in (d.id.lower(), d.name.lower()):
-                            return d
-                except Exception:
-                    pass
-                raise RuntimeError(f"Device '{target_id}' not found via Frida.")
+                pass
 
-        # 2. Try standard USB device lookup with 5-second discovery window
+            try:
+                for device in frida.enumerate_devices():
+                    if target_id.lower() in (device.id.lower(), device.name.lower()):
+                        return device
+            except Exception:
+                pass
+
+            # Also accept a direct Frida TCP endpoint, e.g. 192.168.1.20:27042.
+            if ":" in target_id:
+                try:
+                    self._frida_manager = frida.get_device_manager()
+                    device = self._frida_manager.add_remote_device(target_id)
+                    device.enumerate_processes()
+                    return device
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Could not connect to Frida endpoint '{target_id}': {exc}"
+                    ) from exc
+
+            raise RuntimeError(f"Device '{target_id}' was not found via Frida or ADB.")
+
+        # 2. Prefer the standard USB Frida transport.
         try:
             return frida.get_usb_device(timeout=5)
         except Exception:
             pass
 
-        # 3. Check all devices known to Frida
         try:
             all_devices = frida.enumerate_devices()
         except Exception:
             all_devices = []
 
-        usb_devices = [d for d in all_devices if d.type == 'usb']
+        usb_devices = [device for device in all_devices if device.type == "usb"]
         if len(usb_devices) == 1:
             return usb_devices[0]
-        elif len(usb_devices) > 1:
-            dev_list = ", ".join(f"{d.name} ({d.id})" for d in usb_devices)
+        if len(usb_devices) > 1:
+            dev_list = ", ".join(f"{device.name} ({device.id})" for device in usb_devices)
             raise RuntimeError(
                 f"Multiple USB devices found: {dev_list}. "
-                f"Please specify one with -D <id>"
+                f"Please specify one with --device <id>."
             )
 
-        # 4. Check for remote / emulator devices (e.g. emulator-5554, 192.168.x.x:5555)
         remote_devices = [
-            d for d in all_devices
-            if d.id not in ('local', 'socket', 'barebone') and d.type != 'local'
+            device for device in all_devices
+            if device.id not in ("local", "socket", "barebone")
+            and device.type != "local"
         ]
         if len(remote_devices) == 1:
             return remote_devices[0]
 
-        # 5. Check ADB directly to provide actionable troubleshooting
-        adb_devs = self._get_adb_devices()
-        if adb_devs:
-            for serial, status, _ in adb_devs:
-                if status == 'unauthorized':
-                    raise RuntimeError(
-                        f"Device '{serial}' is UNAUTHORIZED.\n"
-                        f"      Unlock your phone and tap 'Allow USB debugging' on the screen."
-                    )
-                elif status == 'offline':
-                    raise RuntimeError(
-                        f"Device '{serial}' is OFFLINE.\n"
-                        f"      Try reconnecting the USB cable or run: adb kill-server && adb devices"
-                    )
-                elif status == 'device':
-                    # Device is active in ADB, attempt direct connection by serial
-                    try:
-                        return frida.get_device(serial, timeout=5)
-                    except Exception:
-                        pass
-            dev_summary = ", ".join(f"{s} [{st}]" for s, st, _ in adb_devs)
+        # 3. Fall back to ADB forwarding. This is the important path for
+        # wireless ADB devices, whose serial is not a Frida transport ID.
+        active_adb = [
+            serial for serial, status, _ in adb_devs if status == "device"
+        ]
+        if len(active_adb) == 1:
+            return self._connect_via_adb_forward(active_adb[0])
+
+        if len(active_adb) > 1:
+            connected = []
+            errors = []
+            for serial in active_adb:
+                try:
+                    connected.append((serial, self._connect_via_adb_forward(serial)))
+                except Exception as exc:
+                    errors.append(f"{serial}: {exc}")
+            if len(connected) == 1:
+                self._adb_serial = connected[0][0]
+                return connected[0][1]
+            if len(connected) > 1:
+                serials = ", ".join(serial for serial, _ in connected)
+                raise RuntimeError(
+                    f"Multiple Android devices are available through ADB: {serials}. "
+                    f"Select one with --device <adb-serial>."
+                )
             raise RuntimeError(
-                f"ADB detected devices [{dev_summary}], but Frida could not connect.\n"
-                f"      Try restarting ADB: adb kill-server && adb devices"
+                "ADB devices were found, but Frida could not connect:\n  "
+                + "\n  ".join(errors)
+            )
+
+        if adb_devs:
+            dev_summary = ", ".join(
+                f"{serial} [{status}]" for serial, status, _ in adb_devs
+            )
+            if any(status == "unauthorized" for _, status, _ in adb_devs):
+                raise RuntimeError(
+                    f"ADB device is unauthorized: {dev_summary}. "
+                    f"Unlock the phone and approve the debugging prompt."
+                )
+            raise RuntimeError(
+                f"ADB found devices [{dev_summary}], but none is ready. "
+                f"Check Wireless debugging / USB debugging."
             )
 
         raise RuntimeError(
-            "No Android device found.\n"
-            "      • Connect your device via USB with 'USB Debugging' enabled.\n"
-            "      • Run 'adb devices' in your terminal to verify connection."
+            "No Android device found. Connect through USB debugging or Android "
+            "Wireless debugging, then verify with 'adb devices -l'."
         )
 
     # ── --list ──────────────────────────────────────────────
@@ -1176,7 +1309,7 @@ class Sniffer:
             else:
                 first_line = str(e).strip().split('\n')[0]
                 checks.append(("Device (Frida)", first_line, False,
-                               "Check USB cable and ensure USB Debugging is ON"))
+                               "Ensure ADB is authorized and frida-server is running; wireless ADB is supported through automatic port forwarding."))
 
         # Frida Server on Device
         if device:
@@ -1191,8 +1324,18 @@ class Sniffer:
                 server_running = any('frida-server' in p.name.lower() for p in procs)
                 if not server_running:
                     # Also double check via pidof
-                    p_res = subprocess.run(["adb", "shell", "su -c 'pidof frida-server'"],
-                                           capture_output=True, text=True, timeout=3)
+                    adb_cmd = ["adb"]
+                    selected_serial = self._adb_serial
+                    if not selected_serial:
+                        active_adb = [serial for serial, status, _ in adb_devs if status == "device"]
+                        if len(active_adb) == 1:
+                            selected_serial = active_adb[0]
+                    if selected_serial:
+                        adb_cmd.extend(["-s", selected_serial])
+                    p_res = subprocess.run(
+                        adb_cmd + ["shell", "su -c 'pidof frida-server'"],
+                        capture_output=True, text=True, timeout=3
+                    )
                     if p_res.stdout.strip():
                         server_running = True
             except frida.ServerNotRunningError:
@@ -1214,7 +1357,18 @@ class Sniffer:
         # SELinux Mode
         if device:
             try:
-                se_res = subprocess.run(["adb", "shell", "getenforce"], capture_output=True, text=True, timeout=3)
+                adb_cmd = ["adb"]
+                selected_serial = self._adb_serial
+                if not selected_serial:
+                    active_adb = [serial for serial, status, _ in adb_devs if status == "device"]
+                    if len(active_adb) == 1:
+                        selected_serial = active_adb[0]
+                if selected_serial:
+                    adb_cmd.extend(["-s", selected_serial])
+                se_res = subprocess.run(
+                    adb_cmd + ["shell", "getenforce"],
+                    capture_output=True, text=True, timeout=3
+                )
                 se_mode = se_res.stdout.strip()
                 if se_mode == "Permissive":
                     checks.append(("SELinux Mode", "Permissive (ready for injection)", True, None))
@@ -1292,7 +1446,7 @@ class Sniffer:
         # --- Connect device ---
         try:
             self.device = self._get_device()
-            self._ensure_selinux_permissive()
+            self._ensure_selinux_permissive(self._adb_serial)
         except Exception as e:
             print(f"\n  {Fore.RED}[-] Cannot connect to device: {e}{Style.RESET_ALL}")
             print(f"      Run '{Fore.YELLOW}python analyzer.py --doctor{Style.RESET_ALL}' to diagnose.\n")
@@ -1487,7 +1641,7 @@ def build_parser():
         help='Attach to a running process instead of spawning it')
     parser.add_argument(
         '-d', '-D', '--device', default=None,
-        help='Frida device ID (default: first USB device)')
+        help='Frida device ID, ADB serial, or Frida host:port (default: auto-detect USB/ADB)')
     parser.add_argument(
         '--pcap', metavar='FILE',
         help='Save traffic to a Wireshark-compatible PCAP file')
