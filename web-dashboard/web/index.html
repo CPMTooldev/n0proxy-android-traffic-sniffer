@@ -85,7 +85,7 @@ async function refreshApps(){
     for(const a of d.apps){
       const o=document.createElement('option');
       o.value=a.identifier;
-      o.textContent=`${a.name}  ·  `NaN`;
+      o.textContent=a.name+'  ·  '+a.pid;
       sel.appendChild(o);
     }
     if(old)sel.value=old;
@@ -93,11 +93,11 @@ async function refreshApps(){
     const scanErrors=Array.isArray(diag.errors)?diag.errors:[];
     if(d.apps.length){
       $('error').textContent=scanErrors.length?'App scan warning: '+scanErrors.join(' | '):'None';
-      toast(`Found `NaN running app processes`);
+      toast('Found '+d.apps.length+' running app processes');
     }else{
       const detail=scanErrors.length
         ?'Frida scan failed: '+scanErrors.join(' | ')
-        :`Frida returned 0 running processes (installed apps: `NaN}, processes: `NaN). Launch an app and check the Frida connection.`;
+        :'Frida returned 0 running processes (installed apps: '+(diag.applications_seen||0)+', processes: '+(diag.processes_seen||0)+'). Launch an app and check the Frida connection.';
       $('error').textContent=detail;
       toast(detail);
     }
