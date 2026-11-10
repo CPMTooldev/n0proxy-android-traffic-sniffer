@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Frida Network Monitor</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0e13;--panel:#121821;--panel2:#0f151d;--line:#263241;--muted:#91a0b3;--text:#e8edf4;--cyan:#69d8e8;--green:#55d6a0;--red:#ff7585;--amber:#e8bd68;--blue:#86a9ff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(1100px 450px at 15% -10%,#152737 0%,transparent 65%),var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
+button,input,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:9px 13px;color:var(--text);background:#1a2532}button:hover{border-color:#4a637d;background:#202f40}button:disabled{opacity:.45;cursor:not-allowed}.primary{background:#176578;border-color:#237f92}.danger{background:#48232d;border-color:#7b3949}.quiet{background:transparent}.wrap{max-width:1500px;margin:auto;padding:24px}.top{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:20px}.brand{display:flex;gap:13px;align-items:center}.logo{width:43px;height:43px;display:grid;place-items:center;border-radius:13px;background:linear-gradient(145deg,#1c6979,#293c66);font-size:21px}.brand h1{margin:0;font-size:21px;letter-spacing:-.4px}.sub{color:var(--muted);font-size:12px;margin-top:2px}.pill{border:1px solid var(--line);border-radius:99px;padding:6px 10px;color:var(--muted);font-size:12px;display:flex;align-items:center;gap:7px}.dot{width:7px;height:7px;border-radius:50%;background:#657386}.dot.ok{background:var(--green);box-shadow:0 0 9px #55d6a080}.layout{display:grid;grid-template-columns:310px minmax(0,1fr);gap:16px}.panel{background:linear-gradient(180deg,#151d28,#10161f);border:1px solid var(--line);border-radius:14px;box-shadow:0 10px 30px #0002}.side{padding:17px;height:max-content}.main{min-width:0}.section-title{font-size:11px;text-transform:uppercase;letter-spacing:1.1px;color:#9aabc0;font-weight:700;margin:2px 0 12px}.field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}.field label{font-size:12px;color:var(--muted)}select,input{width:100%;border-radius:8px;border:1px solid var(--line);background:#0c121a;color:var(--text);padding:10px;outline:none}select:focus,input:focus{border-color:#4aa6b8}.actions{display:flex;gap:8px;flex-wrap:wrap}.actions button{flex:1}.hint{font-size:11px;color:var(--muted);margin:12px 0 0;line-height:1.55}.statusbox{margin-top:16px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#0b1118}.statusline{display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-size:12px}.statusline span:first-child{color:var(--muted)}.statusline span:last-child{text-align:right;overflow-wrap:anywhere}.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px}.stat{padding:14px 15px}.stat .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}.stat .v{font-size:23px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}.stat .v.small{font-size:18px}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}.filters{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.filters select,.filters input{width:auto;min-width:105px;padding:8px 9px;font-size:12px}.filters input{width:220px}.tools{display:flex;gap:7px;flex-wrap:wrap}.tools button{font-size:12px;padding:8px 10px}.tablewrap{overflow:auto;max-height:calc(100vh - 340px);min-height:300px}table{width:100%;border-collapse:collapse;min-width:780px}thead{position:sticky;top:0;background:#141d28;z-index:1}th{font-size:10px;color:#91a0b3;text-transform:uppercase;letter-spacing:.8px;text-align:left;padding:11px 12px;border-bottom:1px solid var(--line)}td{padding:10px 12px;border-bottom:1px solid #202a37;font-size:12px;vertical-align:middle}tbody tr{cursor:pointer}tbody tr:hover{background:#182332}tbody tr.selected{background:#18313a}.time{color:#92a0b2;white-space:nowrap;font-variant-numeric:tabular-nums}.proto{display:inline-flex;padding:3px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.5px}.tcp{background:#173b4c;color:#75d9f2}.udp{background:#45351b;color:#ffd17d}.dir{font-size:10px;font-weight:800}.out{color:#e5bb73}.in{color:#67d8a7}.endpoint{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#c7d5e5;white-space:nowrap}.preview{max-width:330px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#aab7c7;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.muted{color:var(--muted)}.empty{padding:55px 20px;text-align:center;color:var(--muted)}.detail{border-top:1px solid var(--line);padding:15px;display:none}.detail.show{display:block}.detailhead{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}.detail h3{font-size:13px;margin:0}.detailgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.detailblock{background:#0b1118;border:1px solid var(--line);border-radius:9px;padding:10px;min-width:0}.detailblock label{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.8px;margin-bottom:7px}.detailblock pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;max-height:210px;overflow:auto;font:11px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;color:#cbd6e5}.foot{display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-size:11px;padding:11px 14px}.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1b2a38;border:1px solid #40596f;color:#e9f1fa;border-radius:10px;padding:10px 15px;box-shadow:0 10px 35px #0008;display:none;z-index:5;max-width:90vw}.toast.show{display:block}.warning{color:#e9c078}
+@media(max-width:950px){.layout{grid-template-columns:1fr}.side{height:auto}.stats{grid-template-columns:repeat(3,1fr)}.tablewrap{max-height:60vh}}
+@media(max-width:560px){.wrap{padding:12px}.top{align-items:flex-start}.top .pill{display:none}.stats{grid-template-columns:repeat(2,1fr)}.stat:last-child{grid-column:span 2}.detailgrid{grid-template-columns:1fr}.filters input{width:145px}.toolbar{align-items:flex-start}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><div class="logo">⇄</div><div><h1>Frida Network Monitor</h1><div class="sub">Live TCP / UDP socket telemetry · read-only</div></div></div>
+    <div class="pill"><span class="dot" id="topDot"></span><span id="topState">Not attached</span></div>
+  </header>
+  <div class="layout">
+    <aside class="panel side">
+      <div class="section-title">Target application</div>
+      <div class="field"><label for="apps">Running Android apps</label><select id="apps"><option value="">Connect to Frida and refresh…</option></select></div>
+      <div class="actions"><button id="refresh">↻ Refresh apps</button><button class="primary" id="attach">Attach</button></div>
+      <div class="actions" style="margin-top:8px"><button class="danger" id="detach" disabled>Detach</button></div>
+      <p class="hint">Attach to an app that is already running. This dashboard does not spawn or restart it.</p>
+      <div class="statusbox">
+        <div class="section-title">Connection</div>
+        <div class="statusline"><span>Frida endpoint</span><span id="endpoint">127.0.0.1:27042</span></div>
+        <div class="statusline"><span>Target</span><span id="target">None</span></div>
+        <div class="statusline"><span>Agent</span><span id="agent">Not loaded</span></div>
+        <div class="statusline"><span>Hooks installed</span><span id="hooks">0</span></div>
+        <div class="statusline"><span>Last error</span><span id="error" class="warning">None</span></div>
+      </div>
+      <p class="hint warning">Payloads captured at socket API level. HTTPS/TLS and QUIC data may appear encrypted. This is not a packet-level PCAP capture.</p>
+    </aside>
+    <main class="main">
+      <section class="stats">
+        <div class="panel stat"><div class="k">TCP events</div><div class="v" id="tcpCount">0</div></div>
+        <div class="panel stat"><div class="k">UDP events</div><div class="v" id="udpCount">0</div></div>
+        <div class="panel stat"><div class="k">Outbound</div><div class="v" id="outCount">0</div></div>
+        <div class="panel stat"><div class="k">Inbound</div><div class="v" id="inCount">0</div></div>
+        <div class="panel stat"><div class="k">Data observed</div><div class="v small" id="bytesCount">0 B</div></div>
+      </section>
+      <section class="panel">
+        <div class="toolbar">
+          <div class="filters">
+            <select id="protocol"><option value="ALL">All protocols</option><option>TCP</option><option>UDP</option></select>
+            <select id="direction"><option value="ALL">All directions</option><option value="OUT">Outbound</option><option value="IN">Inbound</option></select>
+            <input id="search" type="search" placeholder="Filter endpoint or payload…">
+          </div>
+          <div class="tools"><button id="pause">Ⅱ Pause view</button><button id="export">↓ Export JSON</button><button id="clear" class="quiet">Clear</button></div>
+        </div>
+        <div class="tablewrap">
+          <table><thead><tr><th>Time</th><th>Proto</th><th>Dir</th><th>Remote endpoint</th><th>Bytes</th><th>Payload preview</th></tr></thead><tbody id="rows"></tbody></table>
+          <div class="empty" id="empty">Attach to a running app to start observing socket traffic.</div>
+        </div>
+        <div class="detail" id="detail">
+          <div class="detailhead"><h3 id="detailTitle">Event details</h3><button class="quiet" id="closeDetail">Close</button></div>
+          <div class="detailgrid">
+            <div class="detailblock"><label>ASCII preview</label><pre id="detailAscii"></pre></div>
+            <div class="detailblock"><label>Hex bytes</label><pre id="detailHex"></pre></div>
+          </div>
+        </div>
+        <div class="foot"><span id="shown">0 events</span><span>Click a row to inspect captured bytes</span></div>
+      </section>
+    </main>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $ = id => document.getElementById(id);
+let events = [], lastId = 0, paused = false, selectedId = null, busy = false;
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3200)}
+async function api(path, options={}){const r=await fetch(path,{cache:'no-store',headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const d=await r.json().catch(()=>({error:r.statusText}));if(!r.ok)throw new Error(d.error||`HTTP ${r.status}`);return d}
+function fmtBytes(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(2)+' MB'}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+async function refreshStatus(){try{const s=await api('/api/status');$('endpoint').textContent=s.remote;$('target').textContent=s.target?`${s.target.name} · ${s.target.pid}`:'None';$('agent').textContent=s.agent_ready?'Ready':(s.attached?'Loading':'Not loaded');$('hooks').textContent=s.agent_hooks;$('error').textContent=s.last_error||'None';$('detach').disabled=!s.attached;$('attach').disabled=busy||s.attached;$('topState').textContent=s.attached?(s.agent_ready?'Monitoring':'Attached'):'Not attached';$('topDot').className='dot'+(s.attached&&s.agent_ready?' ok':'');$('tcpCount').textContent=s.counters.TCP;$('udpCount').textContent=s.counters.UDP;$('outCount').textContent=s.counters.OUT;$('inCount').textContent=s.counters.IN;$('bytesCount').textContent=fmtBytes(s.counters.bytes)}catch(e){$('error').textContent=e.message}}
+async function refreshApps(){try{const d=await api('/api/apps');const sel=$('apps'),old=sel.value;sel.innerHTML='<option value="">Choose a running application…</option>';for(const a of d.apps){const o=document.createElement('option');o.value=a.identifier;o.textContent=`${a.name}  ·  ${a.pid}`;sel.appendChild(o)}if(old)sel.value=old;toast(`Found ${d.apps.length} running app processes`)}catch(e){toast(e.message)}}
+function visible(e){if(e.kind!=='network')return true;if($('protocol').value!=='ALL'&&e.protocol!==$('protocol').value)return false;if($('direction').value!=='ALL'&&e.direction!==$('direction').value)return false;const q=$('search').value.toLowerCase().trim();return !q||`${e.remote} ${e.ascii} ${e.hex}`.toLowerCase().includes(q)}
+function render(){const list=events.filter(visible).slice(-600);$('rows').innerHTML=list.map(e=>{if(e.kind==='network'){const time=(e.time||'').split('T')[1]||e.time||'';return `<tr data-id="${e.id}" class="${selectedId===e.id?'selected':''}"><td class="time">${esc(time)}</td><td><span class="proto ${e.protocol==='UDP'?'udp':'tcp'}">${esc(e.protocol)}</span></td><td><span class="dir ${e.direction==='OUT'?'out':'in'}">${e.direction==='OUT'?'↑ OUT':'↓ IN'}</span></td><td class="endpoint">${esc(e.remote)}</td><td>${fmtBytes(e.size)}${e.truncated?' <span class="muted">(clip)</span>':''}</td><td class="preview">${esc(e.ascii||e.hex||'binary data')}</td></tr>`}return `<tr><td class="time">${esc((e.time||'').split('T')[1]||'')}</td><td colspan="5" class="muted">${e.kind==='error'?'⚠ ':''}${esc(e.message||'Connection event')}</td></tr>`}).join('');$('empty').style.display=list.length?'none':'block';$('shown').textContent=`${list.length} shown · ${events.length} retained`;document.querySelectorAll('tr[data-id]').forEach(row=>row.addEventListener('click',()=>showDetail(Number(row.dataset.id))))}
+function showDetail(id){const e=events.find(x=>x.id===id);if(!e)return;selectedId=id;$('detail').classList.add('show');$('detailTitle').textContent=`${e.protocol} ${e.direction} · ${e.remote} · ${fmtBytes(e.size)}`;$('detailAscii').textContent=e.ascii||'(no text preview)';$('detailHex').textContent=e.hex||'(no payload)';render()}
+async function poll(){try{const d=await api('/api/events?after='+lastId);if(d.events.length){for(const e of d.events){lastId=Math.max(lastId,e.id);events.push(e)}if(events.length>5000)events=events.slice(-5000);if(!paused)render()}await refreshStatus()}catch(e){$('error').textContent=e.message}}
+$('refresh').onclick=refreshApps;
+$('attach').onclick=async()=>{const identifier=$('apps').value;if(!identifier){toast('Choose a running app first');return}busy=true;refreshStatus();try{await api('/api/attach',{method:'POST',body:JSON.stringify({identifier})});events=[];lastId=0;selectedId=null;render();toast('Attached. Start network activity in the app.')}catch(e){toast(e.message)}finally{busy=false;refreshStatus()}};
+$('detach').onclick=async()=>{try{await api('/api/detach',{method:'POST',body:'{}'});toast('Detached from app')}catch(e){toast(e.message)}refreshStatus()};
+$('clear').onclick=async()=>{try{await api('/api/clear',{method:'POST',body:'{}'});events=[];lastId=0;selectedId=null;$('detail').classList.remove('show');render();toast('Event log cleared')}catch(e){toast(e.message)}};
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'▶ Resume view':'Ⅱ Pause view';if(!paused)render()};
+$('export').onclick=()=>{const blob=new Blob([JSON.stringify(events,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='frida-network-events.json';a.click();URL.revokeObjectURL(a.href)};
+$('closeDetail').onclick=()=>{$('detail').classList.remove('show');selectedId=null;render()};
+['protocol','direction','search'].forEach(id=>$(id).addEventListener(id==='search'?'input':'change',render));
+refreshApps();refreshStatus();setInterval(poll,500);
+</script>
+</body>
+</html>
