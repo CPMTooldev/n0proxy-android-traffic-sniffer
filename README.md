@@ -42,6 +42,7 @@ Unlike traditional proxy setups that require complex Wi-Fi proxies, iptables red
 - **🎯 Live Keyword Filtering (`-f`)** — filter output in real-time by keyword (e.g., `password`, `token`, `GET`).
 - **📱 Interactive App Picker** — run with no arguments to pick from currently running apps with a single keystroke.
 - **🩺 Setup Diagnostics (`--doctor`)** — built-in diagnostic suite validates Python, Frida, ADB, SELinux mode, and phone daemon health in seconds.
+- **🖥️ Optional Frida Web Dashboard** — browser-based live TCP/UDP socket telemetry with app selection, payload previews, filters, and JSON export (`web-dashboard/`).
 
 ## 📋 Prerequisites
 
@@ -93,6 +94,28 @@ python analyzer.py --device <adb-serial> com.example.app
 ```
 
 The `--device` option accepts a Frida device ID, an ADB serial (including the `PHONE_IP:PORT` serial printed by `adb devices`), or a direct Frida `host:port` endpoint.
+
+## 🖥️ Optional Frida Web Dashboard (TCP/UDP)
+
+The optional browser dashboard lets you select a running app and inspect live TCP/UDP socket API events without using the terminal UI. It attaches to an already-running process and is separate from the main CLI analyzer.
+
+For wireless Android debugging, first establish the ADB connection and forward the Frida server port to the Pi:
+
+```bash
+adb devices -l
+adb -s <phone-ip>:<wireless-port> forward tcp:27042 tcp:27042
+frida-ps -H 127.0.0.1:27042 -ai
+```
+
+Start the dashboard from the repository root:
+
+```bash
+python3 web-dashboard/server.py --remote 127.0.0.1:27042 --host 0.0.0.0 --port 8765
+```
+
+The server prints a generated password. Open `http://PI_LAN_IP:8765` from a browser on the trusted LAN and sign in with username `frida`. Then refresh the app list, select a running app, and press **Attach**.
+
+See [web-dashboard/README.md](web-dashboard/README.md) for complete setup and limitations. This dashboard captures socket API buffers, not reconstructed packets or PCAP; TLS/HTTPS and QUIC payloads may remain encrypted. It is attach-only and should not be exposed directly to the public internet.
 
 ## 📖 CLI Reference
 
@@ -350,6 +373,11 @@ android-tcp-sniffer/
 ├── diag.js                # Frida diagnostic script (environment sanity check)
 ├── FRIDA_SETUP_GUIDE.md   # Step-by-step frida-server setup guide
 ├── requirements.txt
+├── web-dashboard/         # Optional browser-based TCP/UDP Frida monitor
+│   ├── server.py
+│   ├── agent.js
+│   ├── README.md
+│   └── web/index.html
 └── images/
 ```
 
