@@ -77,7 +77,35 @@ async function api(path, options={}){const r=await fetch(path,{cache:'no-store',
 function fmtBytes(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(2)+' MB'}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 async function refreshStatus(){try{const s=await api('/api/status');$('endpoint').textContent=s.remote;$('target').textContent=s.target?`${s.target.name} · ${s.target.pid}`:'None';$('agent').textContent=s.agent_ready?'Ready':(s.attached?'Loading':'Not loaded');$('hooks').textContent=s.agent_hooks;$('error').textContent=s.last_error||'None';$('detach').disabled=!s.attached;$('attach').disabled=busy||s.attached;$('topState').textContent=s.attached?(s.agent_ready?'Monitoring':'Attached'):'Not attached';$('topDot').className='dot'+(s.attached&&s.agent_ready?' ok':'');$('tcpCount').textContent=s.counters.TCP;$('udpCount').textContent=s.counters.UDP;$('outCount').textContent=s.counters.OUT;$('inCount').textContent=s.counters.IN;$('bytesCount').textContent=fmtBytes(s.counters.bytes)}catch(e){$('error').textContent=e.message}}
-async function refreshApps(){try{const d=await api('/api/apps');const sel=$('apps'),old=sel.value;sel.innerHTML='<option value="">Choose a running application…</option>';for(const a of d.apps){const o=document.createElement('option');o.value=a.identifier;o.textContent=`${a.name}  ·  ${a.pid}`;sel.appendChild(o)}if(old)sel.value=old;toast(`Found ${d.apps.length} running app processes`)}catch(e){toast(e.message)}}
+async function refreshApps(){
+  try{
+    const d=await api('/api/apps');
+    const sel=$('apps'),old=sel.value;
+    sel.innerHTML='<option value="">Choose a running application…</option>';
+    for(const a of d.apps){
+      const o=document.createElement('option');
+      o.value=a.identifier;
+      o.textContent=a.name+'  ·  '+a.pid;
+      sel.appendChild(o);
+    }
+    if(old)sel.value=old;
+    const diag=d.diagnostics||{};
+    const scanErrors=Array.isArray(diag.errors)?diag.errors:[];
+    if(d.apps.length){
+      $('error').textContent=scanErrors.length?'App scan warning: '+scanErrors.join(' | '):'None';
+      toast('Found '+d.apps.length+' running app processes');
+    }else{
+      const detail=scanErrors.length
+        ?'Frida scan failed: '+scanErrors.join(' | ')
+        :'Frida returned 0 running processes (installed apps: '+(diag.applications_seen||0)+', processes: '+(diag.processes_seen||0)+'). Launch an app and check the Frida connection.';
+      $('error').textContent=detail;
+      toast(detail);
+    }
+  }catch(e){
+    $('error').textContent=e.message;
+    toast(e.message);
+  }
+}
 function visible(e){if(e.kind!=='network')return true;if($('protocol').value!=='ALL'&&e.protocol!==$('protocol').value)return false;if($('direction').value!=='ALL'&&e.direction!==$('direction').value)return false;const q=$('search').value.toLowerCase().trim();return !q||`${e.remote} ${e.ascii} ${e.hex}`.toLowerCase().includes(q)}
 function render(){const list=events.filter(visible).slice(-600);$('rows').innerHTML=list.map(e=>{if(e.kind==='network'){const time=(e.time||'').split('T')[1]||e.time||'';return `<tr data-id="${e.id}" class="${selectedId===e.id?'selected':''}"><td class="time">${esc(time)}</td><td><span class="proto ${e.protocol==='UDP'?'udp':'tcp'}">${esc(e.protocol)}</span></td><td><span class="dir ${e.direction==='OUT'?'out':'in'}">${e.direction==='OUT'?'↑ OUT':'↓ IN'}</span></td><td class="endpoint">${esc(e.remote)}</td><td>${fmtBytes(e.size)}${e.truncated?' <span class="muted">(clip)</span>':''}</td><td class="preview">${esc(e.ascii||e.hex||'binary data')}</td></tr>`}return `<tr><td class="time">${esc((e.time||'').split('T')[1]||'')}</td><td colspan="5" class="muted">${e.kind==='error'?'⚠ ':''}${esc(e.message||'Connection event')}</td></tr>`}).join('');$('empty').style.display=list.length?'none':'block';$('shown').textContent=`${list.length} shown · ${events.length} retained`;document.querySelectorAll('tr[data-id]').forEach(row=>row.addEventListener('click',()=>showDetail(Number(row.dataset.id))))}
 function showDetail(id){const e=events.find(x=>x.id===id);if(!e)return;selectedId=id;$('detail').classList.add('show');$('detailTitle').textContent=`${e.protocol} ${e.direction} · ${e.remote} · ${fmtBytes(e.size)}`;$('detailAscii').textContent=e.ascii||'(no text preview)';$('detailHex').textContent=e.hex||'(no payload)';render()}
